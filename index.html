@@ -1,0 +1,378 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remitos > Portal de Pedidos</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f7f6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 50px;
+        }
+        #drop-zone {
+            width: 100%;
+            max-width: 500px;
+            height: 200px;
+            border: 2px dashed #007bff;
+            border-radius: 10px;
+            background-color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: #555;
+            transition: background-color 0.3s;
+            cursor: pointer;
+        }
+        #drop-zone.dragover {
+            background-color: #e2eafc;
+            border-color: #0056b3;
+        }
+        #status {
+            margin-top: 20px;
+            font-weight: bold;
+            color: #333;
+            text-align: center;
+            max-width: 600px;
+        }
+        .alert-box {
+            background-color: #f2dede;
+            color: #a94442;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ebccd1;
+            margin-bottom: 15px;
+            font-size: 14px;
+            text-align: left;
+        }
+        #download-btn {
+            margin-top: 20px;
+            padding: 12px 25px;
+            font-size: 16px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            display: none;
+            font-weight: bold;
+        }
+        #download-btn:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Remitos INTEK -> Portal de Pedidos GLSB</h2>
+    
+    <div id="drop-zone">
+        Arrastrá y soltá los PDFs de Remitos<br>o hacé clic para seleccionarlos
+    </div>
+    <input type="file" id="file-input" accept="application/pdf" multiple style="display: none;">
+
+    <div id="status">Verificando entorno de ejecución...</div>
+    <button id="download-btn">Descargar Excel Consolidado (.xlsx)</button>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+            const statusDiv = document.getElementById('status');
+            const downloadBtn = document.getElementById('download-btn');
+            
+            if (typeof pdfjsLib === 'undefined' || typeof XLSX === 'undefined') {
+                statusDiv.innerHTML = `<div class="alert-box" style="text-align:center;">
+                    <strong>Error de Entorno:</strong> No se pudieron cargar las librerías externas.<br>
+                    Revisá tu conexión a internet o recargá la página.
+                </div>`;
+                return;
+            }
+
+            try {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+                statusDiv.innerText = "Esperando archivos...";
+            } catch (err) {
+                console.error("Error al configurar el Worker de PDF:", err);
+            }
+
+            let excelRowsData = [];
+            let currentFileName = "consolidado_remitos";
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('dragover');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+                if (files.length > 0) {
+                    gestionarLotePDFs(files);
+                } else {
+                    statusDiv.innerText = "Por favor, soltá archivos PDF válidos.";
+                }
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                const files = Array.from(e.target.files);
+                if (files.length > 0) {
+                    gestionarLotePDFs(files);
+                }
+            });
+
+            downloadBtn.addEventListener('click', () => {
+                if (excelRowsData.length === 0) return;
+                
+                const worksheet = XLSX.utils.json_to_sheet(excelRowsData);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Plantilla");
+                
+                worksheet['!cols'] = [
+                    {wch: 16}, {wch: 14}, {wch: 12}, {wch: 28}, {wch: 16}, 
+                    {wch: 16}, {wch: 10}, {wch: 32}, {wch: 14}, {wch: 12}, 
+                    {wch: 12}, {wch: 12}, {wch: 35}, {wch: 16}, {wch: 10}, 
+                    {wch: 10}, {wch: 10}, {wch: 15}
+                ];
+
+                XLSX.writeFile(workbook, `${currentFileName}.xlsx`);
+            });
+
+            // Coordinador del procesamiento por lotes masivos
+            async function gestionarLotePDFs(fileList) {
+                statusDiv.innerHTML = `Procesando lote de <strong>${fileList.length}</strong> archivo(s) en paralelo...`;
+                downloadBtn.style.display = 'none';
+                excelRowsData = []; // Reiniciamos el contenedor global para el nuevo lote
+                
+                // Definir nombre del Excel resultante
+                if (fileList.length === 1) {
+                    currentFileName = fileList[0].name.replace(/\.pdf$/i, "") + "_pedido";
+                } else {
+                    const fechaHoy = new Date().toISOString().slice(0, 10);
+                    currentFileName = `consolidado_remitos_${fechaHoy}`;
+                }
+
+                try {
+                    // Mapeamos cada archivo a una Promesa de extracción
+                    const promesas = fileList.map(file => extraerDatosDePDF(file));
+                    
+                    // Ejecución paralela ultra-rápida
+                    const resultados = await Promise.all(promesas);
+                    
+                    let totalArticulos = 0;
+                    let todosLosFaltantes = [];
+
+                    // Consolidamos los resultados de todos los PDFs en la matriz única
+                    resultados.forEach(res => {
+                        if (res.filas.length > 0) {
+                            excelRowsData = excelRowsData.concat(res.filas);
+                            totalArticulos += res.filas.length;
+                        }
+                        if (res.faltantes.length > 0) {
+                            todosLosFaltantes.push(...res.faltantes);
+                        }
+                    });
+
+                    // Limpiar duplicados de campos faltantes si los hay
+                    todosLosFaltantes = [...new Set(todosLosFaltantes)];
+
+                    if (excelRowsData.length > 0) {
+                        let mensajeFinal = `¡Completado! Se procesaron <strong>${fileList.length} remitos</strong> y se unificaron <strong>${totalArticulos} líneas de artículos</strong> en un único Excel.`;
+                        
+                        if (todosLosFaltantes.length > 0) {
+                            statusDiv.innerHTML = `
+                                <div class="alert-box">
+                                    <strong>Aviso general de lectura:</strong> En algunos archivos no se detectaron con precisión los campos:<br>
+                                    ${todosLosFaltantes.join(", ")}
+                                </div> ${mensajeFinal}`;
+                        } else {
+                            statusDiv.innerHTML = mensajeFinal;
+                        }
+                        downloadBtn.style.display = 'block';
+                    } else {
+                        statusDiv.innerText = "No se pudieron extraer artículos de ninguno de los PDFs provistos.";
+                    }
+
+                } catch (error) {
+                    console.error("Error crítico en el lote:", error);
+                    statusDiv.innerText = "Hubo un error al procesar el lote de archivos.";
+                }
+            }
+
+            // Encapsulación de la lectura individualizada con Promesas
+            function extraerDatosDePDF(file) {
+                return new Promise((resolve) => {
+                    const fileReader = new FileReader();
+                    
+                    fileReader.onload = async function() {
+                        const typedarray = new Uint8Array(this.result);
+                        try {
+                            const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                            let reconstructedText = "";
+
+                            for (let i = 1; i <= pdf.numPages; i++) {
+                                const page = await pdf.getPage(i);
+                                const textContent = await page.getTextContent();
+                                
+                                const rawPageText = textContent.items.map(item => item.str).join(" ");
+                                if (rawPageText.includes("DUPLICADO") || rawPageText.includes("TRIPLICADO")) {
+                                    continue;
+                                }
+
+                                let linesMap = [];
+                                textContent.items.forEach(item => {
+                                    if (!item.str.trim()) return;
+                                    let x = item.transform[4];
+                                    let y = item.transform[5];
+                                    
+                                    let line = linesMap.find(l => Math.abs(l.y - y) < 4);
+                                    if (line) {
+                                        line.items.push({ x: x, str: item.str });
+                                    } else {
+                                        linesMap.push({ y: y, items: [{ x: x, str: item.str }] });
+                                    }
+                                });
+
+                                linesMap.sort((a, b) => b.y - a.y);
+                                linesMap.forEach(line => {
+                                    line.items.sort((a, b) => a.x - b.x);
+                                    reconstructedText += line.items.map(i => i.str).join(" ") + "\n";
+                                });
+                            }
+
+                            const resultadoParseo = parsearTextoEstructurado(reconstructedText);
+                            resolve(resultadoParseo);
+
+                        } catch (err) {
+                            console.error(`Error leyendo el archivo ${file.name}:`, err);
+                            resolve({ filas: [], faltantes: [`Error en archivo: ${file.name}`] });
+                        }
+                    };
+
+                    fileReader.onerror = () => resolve({ filas: [], faltantes: [`Error de lectura: ${file.name}`] });
+                    fileReader.readAsArrayBuffer(file);
+                });
+            }
+
+            function limpiarNombreProducto(detalleCrudo) {
+                let limpio = detalleCrudo.replace(/^\d{11,14}\s*/, "");
+                limpio = limpio.replace(/\d{2}\/\d{2}\/\d{2,4}/g, "");
+                limpio = limpio.replace(/\|/g, "");
+                return limpio.replace(/\s+/g, " ").trim();
+            }
+
+            function parsearTextoEstructurado(texto) {
+                let camposFaltantes = [];
+
+                const matchNroRemito = texto.match(/REMITO N°\s*([\d\s-]+)/i);
+                const matchClienteNom = texto.match(/Señores:\s*(.*?)(?=Cód\.\s*Cliente:|$)/i);
+                const matchDireccion = texto.match(/Dirección:\s*(.*?)(?=I\.?V\.?A\.:?|$)/i);
+                const matchLocProv = texto.match(/Loc\.\/Prov\.:\s*([^\n\r/]+)\s*\/\s*(.*?)(?=C\.?U\.?I\.?T\.:?|$)/i);
+                const matchClienteCod = texto.match(/Cód\.\s*Cliente:\s*([\w\d]+)/i);
+                const matchValorVal = texto.match(/Valor\s+declarado:\s*\$\s*([\d\.,]+)/i);
+                const matchFecha = texto.match(/Fecha:\s*([\d\/]+)/i);
+
+                if (!matchNroRemito) camposFaltantes.push("Número Remito");
+                if (!matchClienteNom) camposFaltantes.push("Razón Social");
+                if (!matchDireccion) camposFaltantes.push("Domicilio");
+                if (!matchLocProv) camposFaltantes.push("Localidad / Provincia");
+
+                let nroRemito = "";
+                if (matchNroRemito) {
+                    const limpioRemito = matchNroRemito[1].replace(/\s+/g, '').trim(); 
+                    const regexPartes = limpioRemito.match(/(\d{2})-(\d{8})/);
+                    if (regexPartes) {
+                        nroRemito = regexPartes[1] + regexPartes[2]; 
+                    } else {
+                        nroRemito = limpioRemito;
+                    }
+                }
+
+                const razonSocial = matchClienteNom ? matchClienteNom[1].trim() : "";
+                const domicilio = matchDireccion ? matchDireccion[1].trim().substring(0, 30) : "";
+                const localidad = matchLocProv ? matchLocProv[1].trim() : "";
+                const provincia = matchLocProv ? matchLocProv[2].trim() : "";
+                const subcliente = matchClienteCod ? matchClienteCod[1].trim() : "";
+
+                let fechaEntrega = "";
+                if (matchFecha) {
+                    const partes = matchFecha[1].trim().split('/');
+                    if (partes.length === 3) {
+                        let dia = partes[0].padStart(2, '0');
+                        let mes = partes[1].padStart(2, '0');
+                        let anio = partes[2].trim().slice(-2); 
+                        fechaEntrega = `${dia}/${mes}/${anio}`;
+                    }
+                }
+
+                let valorDeclarado = "";
+                if (matchValorVal) {
+                    valorDeclarado = matchValorVal[1].replace(/\./g, "").replace(",", ".");
+                }
+
+                const filasMapeadas = [];
+                const lineas = texto.split('\n');
+
+                lineas.forEach(linea => {
+                    linea = linea.trim();
+                    const matchFila = linea.match(/^(\d+)\s+([\w\d.-]+)\s+(.+)$/);
+                    
+                    if (matchFila) {
+                        const cantidad = matchFila[1];
+                        const codigo = matchFila[2];
+                        let residuo = matchFila[3].trim();
+                        
+                        const matchFechaDespacho = residuo.match(/(\d{2}\/\d{2}\/\d{2,4})/);
+                        
+                        if (matchFechaDespacho) {
+                            const fechaDespachoStr = matchFechaDespacho[1];
+                            const indiceFecha = residuo.indexOf(fechaDespachoStr);
+                            let detalleProducto = residuo.substring(0, indiceFecha).trim();
+
+                            filasMapeadas.push({
+                                "Número": nroRemito,
+                                "Fecha de entrega": fechaEntrega,
+                                "Subcliente": subcliente,
+                                "Razon Social": razonSocial,
+                                "Provincia": provincia,
+                                "Localidad": localidad,
+                                "Localidad CP": "", 
+                                "Domicilio": domicilio,
+                                "Valor Declarado": valorDeclarado,
+                                "Referencia A": "", 
+                                "Canal Venta": "",  
+                                "Observaciones": "", 
+                                "Producto": limpiarNombreProducto(detalleProducto),
+                                "Codigo de producto": codigo,
+                                "Lote": "",         
+                                "Serie": "",        
+                                "Cantidad": parseInt(cantidad),
+                                "Estado de producto": "DISPONIBLE" 
+                            });
+                        }
+                    }
+                });
+
+                return {
+                    filas: filasMapeadas,
+                    faltantes: camposFaltantes
+                };
+            }
+        });
+    </script>
+</body>
+</html>
